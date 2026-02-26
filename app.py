@@ -4,9 +4,9 @@ import pandas as pd
 from datetime import datetime
 
 # ==========================================
-# 1. CONFIGURACIÓN Y ESTILOS CSS
+# 1. CONFIGURACIÓN Y ESTILOS
 # ==========================================
-st.set_page_config(page_title="Login-Mis 3 Bendiciones", layout="wide")
+st.set_page_config(page_title="Mis 3 Bendiciones C.A", layout="wide")
 
 st.markdown("""
     <style>
@@ -22,11 +22,12 @@ st.markdown("""
         font-size: 1.1rem !important;
         font-weight: bold !important;
     }
-    .cart-item {
+    .cart-row {
         background-color: #ffffff;
-        padding: 8px;
-        border-bottom: 1px solid #ddd;
-        color: #333;
+        padding: 10px;
+        border-bottom: 1px solid #eee;
+        border-radius: 5px;
+        margin-bottom: 5px;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -84,7 +85,7 @@ if 'carrito' not in st.session_state:
     st.session_state.carrito = {}
 
 if not st.session_state.autenticado:
-    st.title("🏪 Mis 3 Bendiciones - Acceso")
+    st.title("🏪 B3 - ACCESO")
     with st.form("login"):
         u = st.text_input("Usuario")
         p = st.text_input("Clave", type="password")
@@ -95,7 +96,7 @@ if not st.session_state.autenticado:
             elif u == "empleado" and p == "tienda123":
                 st.session_state.autenticado, st.session_state.rol = True, "usuario"
                 st.rerun()
-            else: st.error("Credenciales incorrectas")
+            else: st.error("Usuario o clave incorrecta")
     st.stop()
 
 # ==========================================
@@ -111,7 +112,7 @@ if st.session_state.rol == "admin":
         if st.button("Guardar"):
             actualizar_tasa(nueva); st.rerun()
 
-if st.sidebar.button("🚪 Salir"):
+if st.sidebar.button("🚪 Cerrar Sesión"):
     st.session_state.autenticado = False; st.rerun()
 
 if st.session_state.rol == "admin":
@@ -121,42 +122,55 @@ else:
 
 # --- TAB VENTAS ---
 with tab_ventas:
-    with st.expander("🛒 CARRITO", expanded=len(st.session_state.carrito) > 0):
+    with st.expander("🛒 RESUMEN DEL CARRITO", expanded=len(st.session_state.carrito) > 0):
         if st.session_state.carrito:
             total_u = 0
-            for k, v in st.session_state.carrito.items():
-                sub = v['precio_usd'] * v['cantidad']
+            ids_actuales = list(st.session_state.carrito.keys())
+            
+            for pid in ids_actuales:
+                item = st.session_state.carrito[pid]
+                sub = item['precio_usd'] * item['cantidad']
                 total_u += sub
-                st.markdown(f"<div class='cart-item'><b>{v['cantidad']}x</b> {v['nombre']} — ${sub:.2f}</div>", unsafe_allow_html=True)
+                
+                # Fila de producto con controles + / -
+                col_info, col_restar, col_sumar = st.columns([3, 1, 1])
+                with col_info:
+                    st.markdown(f"**{item['cantidad']}x** {item['nombre']} (${sub:.2f})")
+                with col_restar:
+                    if st.button("➖", key=f"min_{pid}", use_container_width=True):
+                        st.session_state.carrito[pid]['cantidad'] -= 1
+                        if st.session_state.carrito[pid]['cantidad'] <= 0:
+                            del st.session_state.carrito[pid]
+                        st.rerun()
+                with col_sumar:
+                    if st.button("➕", key=f"plus_{pid}", use_container_width=True):
+                        st.session_state.carrito[pid]['cantidad'] += 1
+                        st.rerun()
             
             total_b = total_u * tasa_actual
             st.divider()
-            st.metric("TOTAL A COBRAR (Bs.)", f"{total_b:,.2f} Bs.")
-            st.write(f"Total Divisa: **${total_u:.2f}**")
+            st.metric("TOTAL A PAGAR (Bs.)", f"{total_b:,.2f} Bs.")
+            st.write(f"Total en Divisa: **${total_u:.2f}**")
             
-            # --- SECCIÓN DE CONFIRMACIÓN ---
             st.warning("⚠️ ¿Confirmar el cobro?")
-            confirmado = st.checkbox("Sí, el monto y los productos son correctos")
+            confirmado = st.checkbox("Monto y productos verificados")
             
             c1, c2 = st.columns(2)
             if c1.button("✅ REGISTRAR VENTA", use_container_width=True, type="primary", disabled=not confirmado):
                 registrar_venta(st.session_state.carrito, total_u, tasa_actual, total_b)
                 st.session_state.carrito = {}
-                st.success("✨ ¡VENTA REGISTRADA CON ÉXITO! ✨")
-                st.balloons() # Efecto visual de celebración
-                # Esperamos un momento para que vean el mensaje antes de recargar
-                # st.rerun() se llamará después de que el usuario interactúe de nuevo o podemos usar un botón de 'Nueva Venta'
-                if st.button("🔄 Iniciar Nueva Venta"):
-                    st.rerun()
+                st.success("✨ ¡VENTA REGISTRADA! ✨")
+                st.balloons()
+                if st.button("Siguiente Cliente"): st.rerun()
             
-            if c2.button("🗑️ VACIAR CARRITO", use_container_width=True):
+            if c2.button("🗑️ VACIAR", use_container_width=True):
                 st.session_state.carrito = {}
                 st.rerun()
         else:
-            st.info("El carrito está vacío. Seleccione productos abajo.")
+            st.info("Seleccione productos de la lista abajo.")
 
-    st.subheader("🔍 Productos Disponibles")
-    busqueda = st.text_input("Buscar por nombre...")
+    st.subheader("🔍 Buscar Productos")
+    busqueda = st.text_input("Escriba el nombre...")
     conn = conectar()
     df_p = pd.read_sql_query("SELECT * FROM productos WHERE nombre LIKE ? ORDER BY nombre ASC", conn, params=(f'%{busqueda}%',))
     conn.close()
@@ -182,45 +196,32 @@ if st.session_state.rol == "admin":
                 n = st.text_input("Nombre")
                 c = st.selectbox("Categoría", ["Víveres", "Charcutería", "Limpieza", "Bebidas", "Hogar", "Otros"])
                 p = st.number_input("Precio $", min_value=0.0, step=0.01)
-                if st.form_submit_button("Guardar Producto"):
+                if st.form_submit_button("Guardar"):
                     if n:
                         conn = conectar(); conn.execute("INSERT INTO productos (nombre, categoria, precio_usd) VALUES (?,?,?)", (n,c,p)); conn.commit(); conn.close()
-                        st.success(f"✅ {n} guardado correctamente."); st.rerun()
+                        st.success("Guardado"); st.rerun()
         with cb:
             st.subheader("📂 Carga Masiva")
             f = st.file_uploader("Subir CSV", type=['csv'])
-            if f and st.button("Importar Ahora"):
+            if f and st.button("Importar"):
                 df_i = pd.read_csv(f)
                 conn = conectar(); df_i.to_sql('productos', conn, if_exists='append', index=False); conn.close()
-                st.success("✅ Productos importados con éxito."); st.rerun()
+                st.success("Importado"); st.rerun()
 
     with tab_historial:
         st.header("📄 Historial de Facturas")
-        
         with st.expander("🗑️ ELIMINAR FACTURA ESPECÍFICA"):
-            id_a_eliminar = st.number_input("ID de la factura", min_value=1, step=1)
-            if st.button("Borrar Factura"):
-                conn = conectar()
-                cursor = conn.cursor()
-                cursor.execute("DELETE FROM ventas WHERE id = ?", (id_a_eliminar,))
-                if cursor.rowcount > 0:
-                    conn.commit()
-                    st.success(f"Factura #{id_a_eliminar} eliminada.")
-                    conn.close()
-                    st.rerun()
-                else:
-                    st.error("No se encontró esa ID.")
-                    conn.close()
-
+            idx = st.number_input("ID Factura", min_value=1, step=1)
+            if st.button("Borrar"):
+                conn = conectar(); c = conn.cursor(); c.execute("DELETE FROM ventas WHERE id = ?", (idx,))
+                if c.rowcount > 0: conn.commit(); st.success("Eliminada"); st.rerun()
+                else: st.error("No existe"); conn.close()
         st.divider()
         conn = conectar()
         df_v = pd.read_sql_query("SELECT id AS ID, fecha AS Fecha, productos AS Detalle, total_usd AS 'Total $', tasa_bs AS Tasa, total_bs AS 'Total Bs' FROM ventas ORDER BY id DESC", conn)
         conn.close()
-        
         if not df_v.empty:
             st.dataframe(df_v, use_container_width=True, hide_index=True)
-            if st.button("⚠️ BORRAR TODO EL HISTORIAL"):
+            if st.button("⚠️ BORRAR TODO"):
                 conn = conectar(); conn.execute("DELETE FROM ventas"); conn.commit(); conn.close()
-                st.success("Historial limpiado."); st.rerun()
-        else:
-            st.info("No hay facturas registradas.")
+                st.rerun()
