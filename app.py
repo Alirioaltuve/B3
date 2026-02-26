@@ -6,7 +6,7 @@ from datetime import datetime
 # ==========================================
 # 1. CONFIGURACIÓN Y ESTILOS CSS
 # ==========================================
-st.set_page_config(page_title="POS Venezuela", layout="wide")
+st.set_page_config(page_title="Login-Mis 3 Bendiciones", layout="wide")
 
 st.markdown("""
     <style>
@@ -84,12 +84,12 @@ if 'carrito' not in st.session_state:
     st.session_state.carrito = {}
 
 if not st.session_state.autenticado:
-    st.title("🏪 Punto de Venta - Acceso")
+    st.title("🏪 Mis 3 Bendiciones - Acceso")
     with st.form("login"):
         u = st.text_input("Usuario")
         p = st.text_input("Clave", type="password")
         if st.form_submit_button("Entrar"):
-            if u == "admin" and p == "admin123":
+            if u == "haydee" and p == "paulina/17":
                 st.session_state.autenticado, st.session_state.rol = True, "admin"
                 st.rerun()
             elif u == "empleado" and p == "tienda123":
