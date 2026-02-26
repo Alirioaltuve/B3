@@ -4,31 +4,31 @@ import pandas as pd
 from datetime import datetime
 
 # ==========================================
-# 1. CONFIGURACIÓN Y ESTILOS CSS (ALTA VISIBILIDAD)
+# 1. CONFIGURACIÓN Y ESTILOS CSS REFORZADOS
 # ==========================================
-st.set_page_config(page_title="POS Venezuela", layout="wide")
+st.set_page_config(page_title="Sistema POS Mamá", layout="wide")
 
+# Forzamos colores con CSS de alta prioridad
 st.markdown("""
     <style>
-    /* Forzar visibilidad de métricas */
+    /* Color de los números en las métricas (Azul oscuro para que resalte) */
     [data-testid="stMetricValue"] {
+        color: #1a237e !important;
+        font-size: 1.8rem !important;
+    }
+    /* Color de las etiquetas de las métricas (Negro) */
+    [data-testid="stMetricLabel"] {
         color: #000000 !important;
         font-weight: bold !important;
-        background-color: #e8f0fe;
+    }
+    /* Estilo para los nombres de productos en el carrito */
+    .cart-item {
+        color: #212121;
+        font-weight: 500;
+        background-color: #f1f3f4;
         padding: 5px 10px;
         border-radius: 5px;
-    }
-    [data-testid="stMetricLabel"] {
-        color: #1a237e !important;
-        font-size: 1.1rem !important;
-        font-weight: bold !important;
-    }
-    /* Estilo para el carrito */
-    .cart-item {
-        background-color: #ffffff;
-        padding: 8px;
-        border-bottom: 1px solid #ddd;
-        color: #333;
+        margin-bottom: 2px;
     }
     </style>
     """, unsafe_allow_html=True)
