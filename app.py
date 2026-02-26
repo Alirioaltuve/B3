@@ -4,204 +4,207 @@ import pandas as pd
 from datetime import datetime
 
 # ==========================================
-# 1. CONFIGURACIÓN DE LA PÁGINA
+# 1. CONFIGURACIÓN Y ESTILOS
 # ==========================================
-st.set_page_config(
-    page_title="Punto de Venta VZLA", 
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="Sistema POS Mamá", layout="wide")
+
+# Estilo CSS para que el carrito se vea mejor en móviles
+st.markdown("""
+    <style>
+    .stMetric { background-color: #f0f2f6; padding: 10px; border-radius: 10px; }
+    </style>
+    """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. FUNCIONES DE BASE DE DATOS (SQLITE)
+# 2. GESTIÓN DE BASE DE DATOS
 # ==========================================
-
 def conectar():
-    """Establece conexión con el archivo de base de datos local."""
     return sqlite3.connect('inventario.db')
 
 def crear_db():
-    """Crea las tablas necesarias si no existen al iniciar la app."""
     conn = conectar()
     c = conn.cursor()
-    # Tabla para guardar los productos del negocio
+    # Tabla de Productos
     c.execute('''CREATE TABLE IF NOT EXISTS productos 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                  nombre TEXT, 
-                  categoria TEXT, 
-                  precio_usd REAL)''')
-    
-    # Tabla para guardar el historial de cada venta realizada
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, categoria TEXT, precio_usd REAL)''')
+    # Tabla de Ventas (Facturas)
     c.execute('''CREATE TABLE IF NOT EXISTS ventas 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                  fecha TEXT, 
-                  productos TEXT, 
-                  total_usd REAL, 
-                  tasa_bs REAL, 
-                  total_bs REAL)''')
-    conn.commit()
-    conn.close()
-
-def obtener_productos():
-    """Recupera todos los productos de la DB y los devuelve como un DataFrame de Pandas."""
-    conn = conectar()
-    df = pd.read_sql_query("SELECT * FROM productos ORDER BY nombre ASC", conn)
-    conn.close()
-    return df
-
-def registrar_venta(lista_productos, total_u, tasa, total_b):
-    """Guarda una nueva fila en la tabla de ventas con el detalle de la compra."""
-    conn = conectar()
-    c = conn.cursor()
-    # Unimos los nombres de los productos en un solo texto separado por comas
-    nombres_prod = ", ".join([p['nombre'] for p in lista_productos])
-    # Obtenemos la fecha y hora actual de la computadora
-    fecha_hoy = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, productos TEXT, total_usd REAL, tasa_bs REAL, total_bs REAL)''')
+    # Tabla de Configuración (Tasa)
+    c.execute('''CREATE TABLE IF NOT EXISTS configuracion (id INTEGER PRIMARY KEY, tasa_dolar REAL)''')
     
-    c.execute("INSERT INTO ventas (fecha, productos, total_usd, tasa_bs, total_bs) VALUES (?, ?, ?, ?, ?)",
-              (fecha_hoy, nombres_prod, total_u, tasa, total_b))
+    # Inicializar tasa si la tabla está vacía
+    c.execute("SELECT COUNT(*) FROM configuracion")
+    if c.fetchone()[0] == 0:
+        c.execute("INSERT INTO configuracion (id, tasa_dolar) VALUES (1, 36.5)")
+    
     conn.commit()
     conn.close()
 
-# ==========================================
-# 3. INICIALIZACIÓN Y SIDEBAR
-# ==========================================
+def obtener_tasa():
+    conn = conectar()
+    tasa = conn.execute("SELECT tasa_dolar FROM configuracion WHERE id=1").fetchone()[0]
+    conn.close()
+    return tasa
 
-# Ejecutamos la creación de tablas al cargar
+def actualizar_tasa(nueva_tasa):
+    conn = conectar()
+    conn.execute("UPDATE configuracion SET tasa_dolar = ? WHERE id=1", (nueva_tasa,))
+    conn.commit()
+    conn.close()
+
+def registrar_venta(lista, t_u, tasa, t_b):
+    conn = conectar()
+    nombres = ", ".join([p['nombre'] for p in lista])
+    fecha = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    conn.execute("INSERT INTO ventas (fecha, productos, total_usd, tasa_bs, total_bs) VALUES (?, ?, ?, ?, ?)",
+                 (fecha, nombres, t_u, tasa, t_b))
+    conn.commit()
+    conn.close()
+
+# Inicializar
 crear_db()
 
-# 'session_state' sirve para que los datos del carrito no se borren al hacer click en botones
-if 'carrito' not in st.session_state:
-    st.session_state.carrito = []
+# ==========================================
+# 3. CONTROL DE ACCESO (LOGIN)
+# ==========================================
+if 'autenticado' not in st.session_state:
+    st.session_state.autenticado = False
+    st.session_state.rol = None
 
-# Sidebar: Configuración de la tasa del dólar
-st.sidebar.title("💰 Control de Tasa")
-tasa_dolar = st.sidebar.number_input(
-    "Tasa del Día (Bs.)", 
-    min_value=1.0, 
-    value=36.5, 
-    step=0.1,
-    help="Actualiza este valor según el BCV o paralelo para calcular precios al instante."
-)
-
-st.sidebar.markdown("---")
-st.sidebar.info("Usa este panel para ajustar el cambio antes de empezar a vender.")
+if not st.session_state.autenticado:
+    st.title("🏪 Punto de Venta - Acceso")
+    with st.form("login_form"):
+        user = st.text_input("Usuario")
+        pw = st.text_input("Contraseña", type="password")
+        if st.form_submit_button("Entrar"):
+            if user == "admin" and pw == "admin123":
+                st.session_state.autenticado = True
+                st.session_state.rol = "admin"
+                st.rerun()
+            elif user == "empleado" and pw == "tienda123":
+                st.session_state.autenticado = True
+                st.session_state.rol = "usuario"
+                st.rerun()
+            else:
+                st.error("Credenciales incorrectas")
+    st.stop()
 
 # ==========================================
-# 4. INTERFAZ PRINCIPAL (TABS)
+# 4. LÓGICA DE INTERFAZ
 # ==========================================
 
-tab1, tab2, tab3 = st.tabs(["🛒 Punto de Venta", "⚙️ Inventario", "📄 Historial"])
+# Sidebar: Información y Cierre de Sesión
+st.sidebar.title(f"👤 Rol: {st.session_state.rol.capitalize()}")
+tasa_actual = obtener_tasa()
+st.sidebar.metric("Tasa Actual", f"{tasa_actual} Bs.")
 
-# --- TAB 1: SISTEMA DE VENTAS ---
-with tab1:
-    col_productos, col_carrito = st.columns([2, 1])
-    
-    with col_productos:
-        st.subheader("🔍 Buscador de Productos")
-        busqueda = st.text_input("Escribe el nombre del producto...", placeholder="Ej: Harina")
-        
-        df_p = obtener_productos()
-        if not df_p.empty:
-            # Filtramos el DataFrame según lo que el usuario escribe
-            filtro = df_p[df_p['nombre'].str.contains(busqueda, case=False)]
-            
-            for _, row in filtro.iterrows():
-                # Calculamos el precio en bolívares al vuelo (sin guardarlo en DB)
-                p_bs = row['precio_usd'] * tasa_dolar
-                
-                # Botón de producto: al pulsar se agrega a la lista del carrito
-                if st.button(f"{row['nombre']} | ${row['precio_usd']:.2f} ({p_bs:,.2f} Bs)", key=f"v_btn_{row['id']}", use_container_width=True):
-                    st.session_state.carrito.append(row)
-                    st.toast(f"Agregado: {row['nombre']}")
-        else:
-            st.warning("No hay productos cargados. Ve a la pestaña de Inventario.")
+if st.session_state.rol == "admin":
+    with st.sidebar.expander("🔄 Actualizar Tasa"):
+        nueva = st.number_input("Nueva Tasa", value=tasa_actual, step=0.1)
+        if st.button("Guardar Tasa"):
+            actualizar_tasa(nueva)
+            st.rerun()
 
-    with col_carrito:
-        st.subheader("📝 Cuenta")
+if st.sidebar.button("🚪 Cerrar Sesión"):
+    st.session_state.autenticado = False
+    st.rerun()
+
+# --- PESTAÑAS SEGÚN ROL ---
+if st.session_state.rol == "admin":
+    tabs = st.tabs(["🛒 Ventas", "📦 Inventario", "📄 Historial"])
+else:
+    tabs = st.tabs(["🛒 Ventas"])
+
+# --- TAB 1: VENTAS (Para Admin y Usuario) ---
+with tabs[0]:
+    if 'carrito' not in st.session_state:
+        st.session_state.carrito = []
+
+    # Carrito Flotante (Expander) al principio para evitar scroll largo en móvil
+    with st.expander("🛒 VER CARRITO ACTUAL", expanded=len(st.session_state.carrito) > 0):
         if st.session_state.carrito:
-            # Cálculos totales
-            t_usd = sum(item['precio_usd'] for item in st.session_state.carrito)
-            t_bs = t_usd * tasa_dolar
+            total_u = sum(p['precio_usd'] for p in st.session_state.carrito)
+            total_b = total_u * tasa_actual
             
-            # Listado visual de lo que se va agregando
-            for item in st.session_state.carrito:
-                st.write(f"• {item['nombre']} (${item['precio_usd']:.2f})")
+            for i, p in enumerate(st.session_state.carrito):
+                st.write(f"✅ {p['nombre']} - ${p['precio_usd']:.2f}")
             
             st.divider()
-            st.metric("TOTAL BS.", f"{t_bs:,.2f}")
-            st.write(f"Total Divisa: ${t_usd:,.2f}")
+            st.metric("TOTAL A COBRAR", f"{total_b:,.2f} Bs.")
+            st.write(f"Total en Divisa: ${total_u:,.2f}")
             
-            # Acción para guardar la venta
-            if st.button("✅ FINALIZAR COMPRA", use_container_width=True, type="primary"):
-                registrar_venta(st.session_state.carrito, t_usd, tasa_dolar, t_bs)
-                st.session_state.carrito = [] # Limpiamos carrito tras la venta
-                st.success("Venta guardada en el historial.")
+            col_c1, col_c2 = st.columns(2)
+            if col_c1.button("✅ FINALIZAR", use_container_width=True, type="primary"):
+                registrar_venta(st.session_state.carrito, total_u, tasa_actual, total_b)
+                st.session_state.carrito = []
+                st.success("¡Venta Exitosa!")
                 st.rerun()
-            
-            # Acción para borrar sin guardar
-            if st.button("🗑️ Vaciar Carrito", use_container_width=True):
+            if col_c2.button("🗑️ VACIAR", use_container_width=True):
                 st.session_state.carrito = []
                 st.rerun()
         else:
-            st.info("Selecciona productos para ver la cuenta.")
+            st.info("El carrito está vacío.")
 
-# --- TAB 2: GESTIÓN DE INVENTARIO ---
-with tab2:
-    st.header("Administración")
-    col_manual, col_csv = st.columns(2)
+    st.subheader("🔍 Buscar Productos")
+    busqueda = st.text_input("Nombre del producto...")
     
-    with col_manual:
-        st.subheader("✨ Agregar uno a uno")
-        with st.form("form_nuevo_p", clear_on_submit=True):
-            nombre = st.text_input("Nombre del producto")
-            cat = st.selectbox("Categoría", ["Viveres", "Charcuteria", "Limpieza", "Hogar", "Otros"])
-            precio = st.number_input("Precio en $", min_value=0.0, step=0.01)
-            
-            if st.form_submit_button("Guardar"):
-                if nombre:
-                    conn = conectar()
-                    conn.execute("INSERT INTO productos (nombre, categoria, precio_usd) VALUES (?, ?, ?)", (nombre, cat, precio))
-                    conn.commit()
-                    conn.close()
-                    st.success(f"{nombre} registrado.")
-                    st.rerun()
-
-    with col_csv:
-        st.subheader("📂 Carga masiva")
-        st.write("Sube un archivo .csv con columnas: **nombre, categoria, precio_usd**")
-        archivo = st.file_uploader("Seleccionar CSV", type=['csv'])
-        
-        if archivo and st.button("Importar Productos"):
-            try:
-                df_import = pd.read_csv(archivo)
-                conn = conectar()
-                df_import.to_sql('productos', conn, if_exists='append', index=False)
-                conn.close()
-                st.success("Carga masiva completada.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error: Revisa que las columnas coincidan. {e}")
-
-# --- TAB 3: HISTORIAL DE FACTURAS ---
-with tab3:
-    st.header("Facturas Guardadas")
     conn = conectar()
-    # Leemos todas las ventas guardadas
-    df_ventas = pd.read_sql_query("SELECT * FROM ventas ORDER BY id DESC", conn)
+    df_p = pd.read_sql_query("SELECT * FROM productos WHERE nombre LIKE ?", conn, params=(f'%{busqueda}%',))
     conn.close()
-    
-    if not df_ventas.empty:
-        # Renombramos las columnas para que el usuario las vea bonito
-        df_ventas.columns = ["ID", "Fecha/Hora", "Lista Productos", "Total ($)", "Tasa Aplicada", "Total (Bs.)"]
-        st.dataframe(df_ventas, use_container_width=True, hide_index=True)
-        
-        # Botón de seguridad para borrar el registro
-        if st.button("⚠️ Borrar todo el Historial"):
-            conn = conectar()
-            conn.execute("DELETE FROM ventas")
-            conn.commit()
-            conn.close()
-            st.rerun()
+
+    if not df_p.empty:
+        for _, row in df_p.iterrows():
+            p_bs = row['precio_usd'] * tasa_actual
+            if st.button(f"{row['nombre']} | ${row['precio_usd']:.2f} ({p_bs:,.2f} Bs)", key=f"p_{row['id']}", use_container_width=True):
+                st.session_state.carrito.append(row)
+                st.toast(f"Agregado: {row['nombre']}")
     else:
-        st.info("No hay facturas registradas.")
+        st.write("No se encontraron productos.")
+
+# --- TABS SOLO PARA ADMIN ---
+if st.session_state.rol == "admin":
+    # TAB 2: INVENTARIO
+    with tabs[1]:
+        st.header("Gestión de Inventario")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.subheader("✨ Registro Manual")
+            with st.form("manual_p", clear_on_submit=True):
+                nom = st.text_input("Nombre")
+                cat = st.selectbox("Categoría", ["Víveres", "Charcutería", "Limpieza", "Otros"])
+                pre = st.number_input("Precio $", min_value=0.0, step=0.01)
+                if st.form_submit_button("Guardar"):
+                    if nom:
+                        conn = conectar()
+                        conn.execute("INSERT INTO productos (nombre, categoria, precio_usd) VALUES (?,?,?)", (nom, cat, pre))
+                        conn.commit(); conn.close()
+                        st.success("Guardado")
+                        st.rerun()
+        with c2:
+            st.subheader("📂 Carga Masiva")
+            f = st.file_uploader("Subir CSV", type=['csv'])
+            if f and st.button("Importar"):
+                df_i = pd.read_csv(f)
+                conn = conectar()
+                df_i.to_sql('productos', conn, if_exists='append', index=False)
+                conn.close()
+                st.success("Importado")
+                st.rerun()
+
+    # TAB 3: HISTORIAL
+    with tabs[2]:
+        st.header("📄 Historial de Facturas")
+        conn = conectar()
+        df_v = pd.read_sql_query("SELECT * FROM ventas ORDER BY id DESC", conn)
+        conn.close()
+        
+        if not df_v.empty:
+            st.dataframe(df_v, use_container_width=True, hide_index=True)
+            if st.button("⚠️ ELIMINAR TODO EL HISTORIAL"):
+                conn = conectar()
+                conn.execute("DELETE FROM ventas")
+                conn.commit(); conn.close()
+                st.rerun()
+        else:
+            st.info("No hay registros.")
